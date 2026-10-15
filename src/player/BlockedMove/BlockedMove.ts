@@ -31,7 +31,7 @@ export function detectBlockedMove(ctx: MovementContext): void {
         `move blocked ${ctx.blockedTicks} ticks at ` +
           `(${ctx.origin.x.toFixed(2)}, ${ctx.origin.y.toFixed(2)}, ${ctx.origin.z.toFixed(2)}) ` +
           `vel (${ctx.velocity.x.toFixed(1)}, ${ctx.velocity.y.toFixed(1)}, ${ctx.velocity.z.toFixed(1)}) ` +
-          `contacts [${ctx.contactsThisTick.join(' ')}] — velocity zeroed`,
+          `contacts [${ctx.contactsThisTick.toString()}] — velocity zeroed`,
       );
       set(ctx.velocity, 0, 0, 0);
       ctx.blockedTicks = 0;

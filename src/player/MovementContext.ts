@@ -12,9 +12,10 @@
 // reason the original monolithic class reused them.
 
 import type { Vec3 } from '../math/vec3.js';
-import type { LadderVolume } from '../physics/Collision/Collision.types.js';
+import type { LadderVolume, TraceResult } from '../physics/Collision/Collision.types.js';
 import type { World } from '../physics/World/World.js';
 import type { Settings } from '../settings/Settings.js';
+import type { ContactLog } from './ContactLog/ContactLog.js';
 
 /** Shared by every behavior that turns ctx.yaw/pitch (degrees) into a direction vector. */
 export const DEG2RAD = Math.PI / 180;
@@ -74,13 +75,15 @@ export interface MovementContext {
   landingVelocity: Vec3;
   stuckTicks: number;
   blockedTicks: number;
-  contactsThisTick: string[];
+  contactsThisTick: ContactLog;
 
   // Scratch vectors — reused across ticks to avoid allocation.
   readonly wishDir: Vec3;
   readonly moveEnd: Vec3;
   readonly tmpA: Vec3;
   readonly tmpB: Vec3;
+  /** Reusable trace output; only valid until the next trace made with it. */
+  readonly traceResult: TraceResult;
 
   readonly mins: Vec3;
   readonly maxs: Vec3;

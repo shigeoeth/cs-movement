@@ -5,23 +5,29 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { STANDABLE_NORMAL } from '../../constants.js';
-import { clone, copy, set } from '../../math/vec3.js';
+import { copy, set, vec3 } from '../../math/vec3.js';
 import type { MovementContext } from '../MovementContext.js';
 import { tryPlayerMove } from '../TryPlayerMove/TryPlayerMove.js';
 import { STEP_HEIGHT } from './StepMove.config.js';
+
+// Scratch snapshots, reused every call (stepMove is not re-entrant).
+const startOrigin = vec3();
+const startVel = vec3();
+const downOrigin = vec3();
+const downVel = vec3();
 
 /**
  * Source's StepMove: run the move directly, then again with an 18-unit
  * step-up first; keep whichever version travelled farther horizontally.
  */
 export function stepMove(ctx: MovementContext, dt: number): void {
-  const startOrigin = clone(ctx.origin);
-  const startVel = clone(ctx.velocity);
+  copy(startOrigin, ctx.origin);
+  copy(startVel, ctx.velocity);
 
   // Attempt 1: direct.
   tryPlayerMove(ctx, dt);
-  const downOrigin = clone(ctx.origin);
-  const downVel = clone(ctx.velocity);
+  copy(downOrigin, ctx.origin);
+  copy(downVel, ctx.velocity);
 
   // Attempt 2: up, move, down.
   copy(ctx.origin, startOrigin);
@@ -31,6 +37,7 @@ export function stepMove(ctx: MovementContext, dt: number): void {
     set(ctx.tmpA, ctx.origin.x, ctx.origin.y + STEP_HEIGHT, ctx.origin.z),
     ctx.mins,
     ctx.maxs,
+    ctx.traceResult,
   );
   if (!tr.startSolid && !tr.allSolid) copy(ctx.origin, tr.endPos);
 
@@ -41,6 +48,7 @@ export function stepMove(ctx: MovementContext, dt: number): void {
     set(ctx.tmpA, ctx.origin.x, ctx.origin.y - STEP_HEIGHT, ctx.origin.z),
     ctx.mins,
     ctx.maxs,
+    ctx.traceResult,
   );
   const steppedOntoSteep = tr.fraction < 1 && tr.normal !== null && tr.normal.y < STANDABLE_NORMAL;
   if (!tr.startSolid && !tr.allSolid && !steppedOntoSteep) {

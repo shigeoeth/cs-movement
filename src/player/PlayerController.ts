@@ -15,7 +15,8 @@
 
 import { type Vec3, clone, copy, length2D, set, vec3 } from '../math/vec3.js';
 import { recoverStamina } from '../physics/Stamina/Stamina.js';
-import type { LadderVolume } from '../physics/Collision/Collision.types.js';
+import { createTraceResult } from '../physics/Collision/Collision.js';
+import type { LadderVolume, TraceResult } from '../physics/Collision/Collision.types.js';
 import type { World } from '../physics/World/World.js';
 import type { Settings } from '../settings/Settings.js';
 
@@ -30,6 +31,8 @@ import { categorizePosition } from './CategorizePosition/CategorizePosition.js';
 import { checkStuck } from './StuckCheck/StuckCheck.js';
 import { detectBlockedMove } from './BlockedMove/BlockedMove.js';
 import { createMouseInputHandlers } from './MouseInput/MouseInput.js';
+import { ContactLog } from './ContactLog/ContactLog.js';
+import { TickHistory } from './TickHistory/TickHistory.js';
 
 /** Optional host hooks. Movement never logs or touches globals on its own. */
 export interface PlayerOptions {
@@ -106,18 +109,18 @@ export class PlayerController implements MovementContext {
   landingVelocity = vec3();
   stuckTicks = 0;
   blockedTicks = 0;
-  contactsThisTick: string[] = [];
+  contactsThisTick = new ContactLog();
 
   // Scratch vectors — reused across ticks to avoid allocation.
   readonly wishDir = vec3();
   readonly moveEnd = vec3();
   readonly tmpA = vec3();
   readonly tmpB = vec3();
+  readonly traceResult: TraceResult = createTraceResult();
 
   // Rolling per-tick history for dumpMovementLog(). Not part of
   // MovementContext — this is PlayerController's own diagnostic API.
-  private tickCount = 0;
-  private readonly tickHistory: string[] = [];
+  private readonly tickHistory = new TickHistory();
   private readonly spawn: Vec3;
 
   constructor(world: World, settings: Settings, spawn: Vec3, opts: PlayerOptions = {}) {
@@ -136,7 +139,7 @@ export class PlayerController implements MovementContext {
    * the library never registers globals to push it anywhere.
    */
   tickHistoryText(): string {
-    return this.tickHistory.join('\n');
+    return this.tickHistory.toString();
   }
 
   get mins(): Vec3 {
@@ -310,25 +313,7 @@ export class PlayerController implements MovementContext {
   }
 
   private recordTick(): void {
-    const o = this.origin;
-    const v = this.velocity;
-    const i = this.input;
-    const keys =
-      (i.forward ? 'W' : '') +
-      (i.back ? 'S' : '') +
-      (i.left ? 'A' : '') +
-      (i.right ? 'D' : '') +
-      (i.jump ? 'J' : '') +
-      (i.duck ? 'C' : '') +
-      (i.walk ? 'H' : '');
-    const flags =
-      (this.onGround ? 'G' : 'A') + (this.surfing ? 's' : '') + (this.onLadder ? 'L' : '') + (this.ducked ? 'd' : '');
-    const contacts = this.contactsThisTick.length > 0 ? ` c[${this.contactsThisTick.join(' ')}]` : '';
-    this.tickHistory.push(
-      `${this.tickCount++} p ${o.x.toFixed(1)},${o.y.toFixed(1)},${o.z.toFixed(1)} ` +
-        `v ${v.x.toFixed(1)},${v.y.toFixed(1)},${v.z.toFixed(1)} ${flags} in:${keys || '-'}${contacts}`,
-    );
-    if (this.tickHistory.length > 384) this.tickHistory.shift();
-    this.contactsThisTick = [];
+    this.tickHistory.record(this);
+    this.contactsThisTick.clear();
   }
 }

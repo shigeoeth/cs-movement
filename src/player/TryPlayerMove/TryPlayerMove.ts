@@ -5,11 +5,16 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 import { STANDABLE_NORMAL } from '../../constants.js';
-import { clone, copy, cross, dot, lengthSq, normalize, scale, addScaled, set, type Vec3 } from '../../math/vec3.js';
+import { copy, cross, dot, lengthSq, normalize, scale, addScaled, set, vec3, type Vec3 } from '../../math/vec3.js';
 import { clipVelocity } from '../../physics/ClipVelocity/ClipVelocity.js';
 import { OVERBOUNCE_DEFAULT, OVERBOUNCE_SURF } from '../../physics/ClipVelocity/ClipVelocity.config.js';
 import type { MovementContext } from '../MovementContext.js';
 import { MAX_CLIP_PLANES } from './TryPlayerMove.config.js';
+
+// Scratch state, reused every call (tryPlayerMove is not re-entrant).
+const planePool: Vec3[] = Array.from({ length: MAX_CLIP_PLANES }, () => vec3());
+const originalVel = vec3();
+const primalVel = vec3();
 
 function overbounceFor(normal: Vec3): number {
   // Surf-steep slopes clip with exactly 1.0 so no speed is bled; everything
@@ -24,16 +29,16 @@ function overbounceFor(normal: Vec3): number {
  */
 export function tryPlayerMove(ctx: MovementContext, dt: number): void {
   let timeLeft = dt;
-  const planes: Vec3[] = [];
-  const originalVel = clone(ctx.velocity);
-  const primalVel = clone(ctx.velocity);
+  let planeCount = 0;
+  copy(originalVel, ctx.velocity);
+  copy(primalVel, ctx.velocity);
   ctx.surfing = false;
 
   for (let bump = 0; bump < 4; bump++) {
     if (lengthSq(ctx.velocity) === 0) break;
 
     addScaled(ctx.moveEnd, ctx.origin, ctx.velocity, timeLeft);
-    const tr = ctx.world.trace(ctx.origin, ctx.moveEnd, ctx.mins, ctx.maxs);
+    const tr = ctx.world.trace(ctx.origin, ctx.moveEnd, ctx.mins, ctx.maxs, ctx.traceResult);
 
     if (tr.allSolid) {
       ctx.log('tryPlayerMove: allSolid — velocity zeroed');
@@ -43,16 +48,16 @@ export function tryPlayerMove(ctx: MovementContext, dt: number): void {
     if (tr.fraction > 0) {
       copy(ctx.origin, tr.endPos);
       copy(originalVel, ctx.velocity);
-      planes.length = 0;
+      planeCount = 0;
     }
     if (tr.fraction === 1) break;
 
     const n = tr.normal!;
-    ctx.contactsThisTick.push(`${n.x.toFixed(2)},${n.y.toFixed(2)},${n.z.toFixed(2)}@${tr.fraction.toFixed(2)}`);
+    ctx.contactsThisTick.push(n, tr.fraction);
 
     timeLeft -= timeLeft * tr.fraction;
 
-    if (planes.length >= MAX_CLIP_PLANES) {
+    if (planeCount >= MAX_CLIP_PLANES) {
       ctx.log('tryPlayerMove: exceeded MAX_CLIP_PLANES — velocity zeroed');
       set(ctx.velocity, 0, 0, 0);
       return;
@@ -60,19 +65,24 @@ export function tryPlayerMove(ctx: MovementContext, dt: number): void {
     // Zero-fraction bumps re-report the plane we're already resting
     // against; accumulating the duplicate would make the crease fallback
     // compute cross(n, n) = 0 and kill all velocity (ramp "sticking").
-    if (!planes.some((p) => dot(p, tr.normal!) > 0.99)) {
-      planes.push(clone(tr.normal!));
+    let duplicate = false;
+    for (let k = 0; k < planeCount; k++) {
+      if (dot(planePool[k], n) > 0.99) {
+        duplicate = true;
+        break;
+      }
     }
+    if (!duplicate) copy(planePool[planeCount++], n);
     if (tr.normal!.y > 0.05 && tr.normal!.y < STANDABLE_NORMAL) ctx.surfing = true;
 
     // Find a clip of the original velocity that doesn't re-enter any plane.
     let i = 0;
-    for (; i < planes.length; i++) {
+    for (; i < planeCount; i++) {
       copy(ctx.velocity, originalVel);
-      clipVelocity(ctx.velocity, planes[i], overbounceFor(planes[i]));
+      clipVelocity(ctx.velocity, planePool[i], overbounceFor(planePool[i]));
       let ok = true;
-      for (let j = 0; j < planes.length; j++) {
-        if (j !== i && dot(ctx.velocity, planes[j]) < 0) {
+      for (let j = 0; j < planeCount; j++) {
+        if (j !== i && dot(ctx.velocity, planePool[j]) < 0) {
           ok = false;
           break;
         }
@@ -80,21 +90,21 @@ export function tryPlayerMove(ctx: MovementContext, dt: number): void {
       if (ok) break;
     }
 
-    if (i === planes.length) {
+    if (i === planeCount) {
       // No single plane worked — slide along the crease of the first two.
-      if (planes.length !== 2) {
-        ctx.log(`tryPlayerMove: cornered by ${planes.length} planes — velocity zeroed`);
+      if (planeCount !== 2) {
+        ctx.log(`tryPlayerMove: cornered by ${planeCount} planes — velocity zeroed`);
         set(ctx.velocity, 0, 0, 0);
         return;
       }
-      cross(ctx.tmpB, planes[0], planes[1]);
+      cross(ctx.tmpB, planePool[0], planePool[1]);
       const creaseLen = normalize(ctx.tmpB);
       if (creaseLen < 1e-6) {
         // Degenerate (near-parallel planes): fall back to a single clip
         // rather than zeroing the move.
         ctx.log('tryPlayerMove: degenerate crease — single-plane fallback');
         copy(ctx.velocity, originalVel);
-        clipVelocity(ctx.velocity, planes[0], overbounceFor(planes[0]));
+        clipVelocity(ctx.velocity, planePool[0], overbounceFor(planePool[0]));
       } else {
         scale(ctx.velocity, ctx.tmpB, dot(ctx.tmpB, ctx.velocity));
       }

@@ -16,6 +16,7 @@ export function stayOnGround(ctx: MovementContext): void {
     set(ctx.tmpA, ctx.origin.x, ctx.origin.y - STEP_HEIGHT, ctx.origin.z),
     ctx.mins,
     ctx.maxs,
+    ctx.traceResult,
   );
   if (tr.fraction > 0 && tr.fraction < 1 && !tr.startSolid && tr.normal !== null && tr.normal.y >= STANDABLE_NORMAL) {
     copy(ctx.origin, tr.endPos);

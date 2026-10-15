@@ -153,16 +153,70 @@ function clipBoxToBrush(
   }
 }
 
-export function traceBox(start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3, brushes: Brush[]): TraceResult {
-  const result: TraceResult = {
-    fraction: 1,
-    endPos: clone(end),
-    normal: null,
-    startSolid: false,
-    allSolid: false,
-  };
+export function createTraceResult(): TraceResult {
+  return { fraction: 1, endPos: vec3(), normal: null, startSolid: false, allSolid: false };
+}
 
-  // Broadphase: sweep AABB of the whole move.
+function resetTraceResult(out: TraceResult, end: Vec3): void {
+  out.fraction = 1;
+  out.endPos.x = end.x;
+  out.endPos.y = end.y;
+  out.endPos.z = end.z;
+  out.normal = null;
+  out.startSolid = false;
+  out.allSolid = false;
+}
+
+function finishTraceResult(out: TraceResult, start: Vec3, end: Vec3): void {
+  // Note: startSolid does NOT pin the trace — a start inside one brush still
+  // clips against the others (Quake 2 semantics). Escaping an overlapped
+  // start is the mover's job (PlayerController.checkStuck), because pinning
+  // here freezes the player in place while gravity pumps their velocity.
+  if (out.fraction < 1) {
+    out.endPos.x = start.x + (end.x - start.x) * out.fraction;
+    out.endPos.y = start.y + (end.y - start.y) * out.fraction;
+    out.endPos.z = start.z + (end.z - start.z) * out.fraction;
+  }
+}
+
+/** Padded AABB of a whole move, for the broadphase. Written into `out` as [minX, minY, minZ, maxX, maxY, maxZ]. */
+export function sweepBounds(start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3, out: Float64Array): void {
+  const pad = 1;
+  out[0] = Math.min(start.x, end.x) + mins.x - pad;
+  out[1] = Math.min(start.y, end.y) + mins.y - pad;
+  out[2] = Math.min(start.z, end.z) + mins.z - pad;
+  out[3] = Math.max(start.x, end.x) + maxs.x + pad;
+  out[4] = Math.max(start.y, end.y) + maxs.y + pad;
+  out[5] = Math.max(start.z, end.z) + maxs.z + pad;
+}
+
+function clipIfInBounds(brush: Brush, b: Float64Array, start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3, out: TraceResult): void {
+  if (
+    brush.min.x > b[3] || brush.max.x < b[0] ||
+    brush.min.y > b[4] || brush.max.y < b[1] ||
+    brush.min.z > b[5] || brush.max.z < b[2]
+  ) {
+    return;
+  }
+  clipBoxToBrush(brush, start, end, mins, maxs, out);
+}
+
+/**
+ * Trace a box through every brush. Pass `out` to reuse a result object
+ * (allocation-free); the returned object is `out` in that case.
+ */
+export function traceBox(
+  start: Vec3,
+  end: Vec3,
+  mins: Vec3,
+  maxs: Vec3,
+  brushes: Brush[],
+  out: TraceResult = createTraceResult(),
+): TraceResult {
+  resetTraceResult(out, end);
+
+  // Broadphase bounds live in locals — this loop is the hottest code in the
+  // library for worlds too small (or queries too wide) for the spatial grid.
   const pad = 1;
   const sMinX = Math.min(start.x, end.x) + mins.x - pad;
   const sMinY = Math.min(start.y, end.y) + mins.y - pad;
@@ -171,7 +225,8 @@ export function traceBox(start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3, brushes
   const sMaxY = Math.max(start.y, end.y) + maxs.y + pad;
   const sMaxZ = Math.max(start.z, end.z) + maxs.z + pad;
 
-  for (const brush of brushes) {
+  for (let i = 0; i < brushes.length; i++) {
+    const brush = brushes[i];
     if (
       brush.min.x > sMaxX || brush.max.x < sMinX ||
       brush.min.y > sMaxY || brush.max.y < sMinY ||
@@ -179,19 +234,33 @@ export function traceBox(start: Vec3, end: Vec3, mins: Vec3, maxs: Vec3, brushes
     ) {
       continue;
     }
-    clipBoxToBrush(brush, start, end, mins, maxs, result);
+    clipBoxToBrush(brush, start, end, mins, maxs, out);
   }
 
-  // Note: startSolid does NOT pin the trace — a start inside one brush still
-  // clips against the others (Quake 2 semantics). Escaping an overlapped
-  // start is the mover's job (PlayerController.checkStuck), because pinning
-  // here freezes the player in place while gravity pumps their velocity.
-  if (result.fraction < 1) {
-    result.endPos.x = start.x + (end.x - start.x) * result.fraction;
-    result.endPos.y = start.y + (end.y - start.y) * result.fraction;
-    result.endPos.z = start.z + (end.z - start.z) * result.fraction;
-  }
-  return result;
+  finishTraceResult(out, start, end);
+  return out;
+}
+
+/**
+ * Same as traceBox but only against `brushes[ids[0..count)]` — a candidate
+ * list from a spatial index. `ids` must be ascending so tie-breaking between
+ * equidistant brushes matches the linear scan exactly.
+ */
+export function traceBoxCandidates(
+  start: Vec3,
+  end: Vec3,
+  mins: Vec3,
+  maxs: Vec3,
+  brushes: Brush[],
+  ids: Int32Array,
+  count: number,
+  bounds: Float64Array,
+  out: TraceResult,
+): TraceResult {
+  resetTraceResult(out, end);
+  for (let i = 0; i < count; i++) clipIfInBounds(brushes[ids[i]], bounds, start, end, mins, maxs, out);
+  finishTraceResult(out, start, end);
+  return out;
 }
 
 /** True if a box at `origin` overlaps the (convex) volume. */

@@ -30,7 +30,15 @@ export function airAccelerate(
   const addspeed = wishspd - currentspeed;
   if (addspeed <= 0) return;
 
-  let accelspeed = airaccel * wishspeed * dt;
+  // CS:GO Deadstrafe bug: when vertical velocity is between 0 and +140 u/s,
+  // CategorizePosition reduces surfaceFriction to 0.25, which multiplies here
+  // and reduces air strafe efficiency by ~75% at the start of a jump.
+  let surfaceFriction = 1.0;
+  if (vel.y >= 0 && vel.y <= 140) {
+    surfaceFriction = 0.25;
+  }
+
+  let accelspeed = airaccel * wishspeed * dt * surfaceFriction;
   if (accelspeed > addspeed) accelspeed = addspeed;
 
   vel.x += accelspeed * wishdir.x;

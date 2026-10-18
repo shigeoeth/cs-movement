@@ -36,13 +36,10 @@ export function updateDuck(ctx: MovementContext): void {
   if (want && !ctx.ducked) {
     ctx.ducked = true;
     if (!ctx.onGround) {
-      // In-air duck pulls the feet up so the head stays put (lets you duck
-      // onto ledges, as in CS).
+      // CS:GO crouch-jump: всегда подтягиваем ноги в воздухе, чтобы 
+      // преодолеть уступ, даже если впереди препятствие.
       const delta = HULL_STAND_HEIGHT - HULL_DUCK_HEIGHT;
-      set(ctx.tmpA, ctx.origin.x, ctx.origin.y + delta, ctx.origin.z);
-      if (ctx.world.isPositionFree(ctx.tmpA, DUCK_MINS, DUCK_MAXS)) {
-        ctx.origin.y += delta;
-      }
+      ctx.origin.y += delta;
     }
   } else if (!want && ctx.ducked) {
     tryUnduck(ctx);
